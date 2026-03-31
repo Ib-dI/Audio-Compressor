@@ -2,7 +2,7 @@
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -12,39 +12,58 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { FFmpeg } from "@ffmpeg/ffmpeg"
 import { fetchFile } from "@ffmpeg/util"
+import { motion, AnimatePresence } from "framer-motion"
 import {
   CheckCircle2,
   Download,
   FileAudio,
-  Info,
-  Settings,
   Upload,
   Zap,
   X,
-  Trash2
+  Trash2,
+  AlertCircle,
+  Loader2,
+  Music2,
+  SlidersHorizontal,
+  Info,
 } from "lucide-react"
 import React, { useEffect, useRef, useState } from "react"
 
-const ffmpeg = new FFmpeg()
-
-interface PresetConfig {
+interface PresetConfig { 
   bitrate: number
   sampleRate: number
   channels: 1 | 2
   label: string
+  description: string
 }
 
 type PresetKey = "ultra" | "light" | "medium" | "quality" | "custom"
 
 const PRESETS: Record<PresetKey, PresetConfig> = {
-  ultra: { bitrate: 16, sampleRate: 12000, channels: 1, label: "Ultra léger (Voix)" },
-  light: { bitrate: 32, sampleRate: 16000, channels: 1, label: "Léger (Podcast)" },
-  medium: { bitrate: 64, sampleRate: 22050, channels: 1, label: "Moyen (Mono)" },
-  quality: { bitrate: 96, sampleRate: 44100, channels: 2, label: "Qualité (Stéréo)" },
-  custom: { bitrate: 32, sampleRate: 16000, channels: 1, label: "Personnalisé" }
+  ultra:   { bitrate: 16, sampleRate: 12000, channels: 1, label: "Ultra léger", description: "Voix · 16 kb/s · 12 kHz · Mono" },
+  light:   { bitrate: 32, sampleRate: 16000, channels: 1, label: "Léger",       description: "Podcast · 32 kb/s · 16 kHz · Mono" },
+  medium:  { bitrate: 64, sampleRate: 22050, channels: 1, label: "Moyen",       description: "Radio · 64 kb/s · 22 kHz · Mono" },
+  quality: { bitrate: 96, sampleRate: 44100, channels: 2, label: "Qualité",     description: "Stéréo · 96 kb/s · 44 kHz · Stéréo" },
+  custom:  { bitrate: 32, sampleRate: 16000, channels: 1, label: "Personnalisé", description: "Configurer manuellement" },
 }
+
+const CDN_CONFIGS = [
+  {
+    coreURL: "https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.js",
+    wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.wasm",
+  },
+  {
+    coreURL: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.js",
+    wasmURL: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.wasm",
+  },
+  {
+    coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
+    wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
+  },
+]
 
 interface AudioFile {
   id: string
@@ -53,504 +72,544 @@ interface AudioFile {
   compressedSize: number | null
   compressedUrl: string | null
   progress: number
-  status: 'pending' | 'compressing' | 'completed' | 'error'
+  status: "pending" | "compressing" | "completed" | "error"
   error: string | null
+}
+
+const STATUS_STYLES: Record<AudioFile["status"], string> = {
+  pending:    "border-l-border",
+  compressing:"border-l-blue-500",
+  completed:  "border-l-emerald-500",
+  error:      "border-l-destructive",
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B"
+  const k = 1024
+  const sizes = ["B", "KB", "MB", "GB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i]
 }
 
 export default function AudioCompressor() {
   const [files, setFiles] = useState<AudioFile[]>([])
-  const [isCompressing, setIsCompressing] = useState<boolean>(false)
+  const [isCompressing, setIsCompressing] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const [preset, setPreset] = useState<PresetKey>("light")
-  const [bitrate, setBitrate] = useState<number>(32)
-  const [sampleRate, setSampleRate] = useState<number>(16000)
+  const [bitrate, setBitrate] = useState(32)
+  const [sampleRate, setSampleRate] = useState(16000)
   const [channels, setChannels] = useState<1 | 2>(1)
-  const [ffmpegLoaded, setFfmpegLoaded] = useState<boolean>(false)
-  const [error, setError] = useState<string | null>(null)
+  const [ffmpegLoaded, setFfmpegLoaded] = useState(false)
+  const [globalError, setGlobalError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const ffmpegRef = useRef<FFmpeg | null>(null)
 
   useEffect(() => {
     loadFFmpeg()
+    return () => {
+      setFiles(prev => {
+        prev.forEach(f => { if (f.compressedUrl) URL.revokeObjectURL(f.compressedUrl) })
+        return prev
+      })
+    }
   }, [])
 
   const loadFFmpeg = async () => {
     try {
-      if (!ffmpeg.loaded) {
-        const cdnConfigs = [
-          {
-            coreURL: "https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.js",
-            wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.wasm",
-          },
-          {
-            coreURL: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.js",
-            wasmURL: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.wasm",
-          },
-          {
-            coreURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
-            wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
-          }
-        ]
-        
-        let loaded = false
-        let lastError = null
-        
-        for (const config of cdnConfigs) {
-          try {
-            console.log('Tentative de chargement depuis:', config.coreURL)
-            await ffmpeg.load(config)
-            loaded = true
-            console.log('FFmpeg chargé avec succès!')
-            break
-          } catch (err) {
-            lastError = err
-            console.warn(`Échec du chargement depuis ${config.coreURL}:`, err)
-          }
-        }
-        
-        if (loaded) {
+      if (!ffmpegRef.current) ffmpegRef.current = new FFmpeg()
+      const ffmpeg = ffmpegRef.current
+      if (ffmpeg.loaded) { setFfmpegLoaded(true); return }
+
+      let lastError: unknown = null
+      for (const config of CDN_CONFIGS) {
+        try {
+          await ffmpeg.load(config)
           setFfmpegLoaded(true)
-        } else {
-          throw lastError || new Error("Impossible de charger FFmpeg depuis aucun CDN")
+          return
+        } catch (err) {
+          lastError = err
         }
       }
+      throw lastError ?? new Error("Impossible de charger FFmpeg depuis aucun CDN")
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      setError("Erreur de chargement FFmpeg: " + message + ". Essayez de recharger la page.")
-      console.error('Erreur FFmpeg complète:', err)
+      setGlobalError("Erreur FFmpeg : " + message)
     }
   }
 
   const handlePresetChange = (value: string) => {
-    const presetKey = value as PresetKey
-    setPreset(presetKey)
-    if (presetKey !== "custom") {
-      setBitrate(PRESETS[presetKey].bitrate)
-      setSampleRate(PRESETS[presetKey].sampleRate)
-      setChannels(PRESETS[presetKey].channels)
+    const key = value as PresetKey
+    setPreset(key)
+    if (key !== "custom") {
+      setBitrate(PRESETS[key].bitrate)
+      setSampleRate(PRESETS[key].sampleRate)
+      setChannels(PRESETS[key].channels)
     }
   }
 
-  const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
-    const droppedFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("audio/"))
-    if (droppedFiles.length > 0) {
-      addFiles(droppedFiles)
-    }
+    setIsDragging(false)
+    const dropped = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("audio/"))
+    if (dropped.length > 0) addFiles(dropped)
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = e.target.files ? Array.from(e.target.files) : []
-    if (selectedFiles.length > 0) {
-      addFiles(selectedFiles)
-    }
+    const selected = e.target.files ? Array.from(e.target.files) : []
+    if (selected.length > 0) addFiles(selected)
+    e.target.value = ""
   }
 
   const addFiles = (newFiles: File[]) => {
     const audioFiles: AudioFile[] = newFiles.map(file => ({
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       file,
       originalSize: file.size,
       compressedSize: null,
       compressedUrl: null,
       progress: 0,
-      status: 'pending' as const,
-      error: null
+      status: "pending",
+      error: null,
     }))
     setFiles(prev => [...prev, ...audioFiles])
-    setError(null)
+    setGlobalError(null)
   }
 
   const removeFile = (id: string) => {
-    setFiles(prev => prev.filter(f => f.id !== id))
+    setFiles(prev => {
+      const f = prev.find(f => f.id === id)
+      if (f?.compressedUrl) URL.revokeObjectURL(f.compressedUrl)
+      return prev.filter(f => f.id !== id)
+    })
   }
 
   const clearAll = () => {
-    setFiles([])
-  }
-
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return "0 B"
-    const k = 1024
-    const sizes = ["B", "KB", "MB", "GB"]
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
+    setFiles(prev => {
+      prev.forEach(f => { if (f.compressedUrl) URL.revokeObjectURL(f.compressedUrl) })
+      return []
+    })
   }
 
   const compressFile = async (audioFile: AudioFile) => {
+    const ffmpeg = ffmpegRef.current!
+    const ext = audioFile.file.name.substring(audioFile.file.name.lastIndexOf(".")) || ".audio"
+    const inputName = `input_${audioFile.id}${ext}`
+    const outputName = `output_${audioFile.id}.ogg`
+
     try {
-      setFiles(prev => prev.map(f => 
-        f.id === audioFile.id ? { ...f, status: 'compressing' as const, progress: 10 } : f
+      setFiles(prev => prev.map(f =>
+        f.id === audioFile.id ? { ...f, status: "compressing", progress: 5 } : f
       ))
 
-      const inputName = "input" + audioFile.file.name.substring(audioFile.file.name.lastIndexOf("."))
-      const outputName = "output.ogg"
+      const onProgress = ({ progress }: { progress: number }) => {
+        setFiles(prev => prev.map(f =>
+          f.id === audioFile.id ? { ...f, progress: Math.min(95, Math.round(5 + progress * 90)) } : f
+        ))
+      }
+      ffmpeg.on("progress", onProgress)
 
       await ffmpeg.writeFile(inputName, await fetchFile(audioFile.file))
-      
-      setFiles(prev => prev.map(f => 
-        f.id === audioFile.id ? { ...f, progress: 30 } : f
-      ))
-
       await ffmpeg.exec([
         "-i", inputName,
+        "-vn",
+        "-map", "0:a",
+        "-c:a", "libvorbis",
         "-ac", channels.toString(),
         "-ar", sampleRate.toString(),
         "-b:a", `${bitrate}k`,
         "-compression_level", "10",
-        "-vn",
-        outputName
+        outputName,
       ])
 
-      setFiles(prev => prev.map(f => 
-        f.id === audioFile.id ? { ...f, progress: 80 } : f
-      ))
+      ffmpeg.off("progress", onProgress)
 
       const data = await ffmpeg.readFile(outputName)
       const byteData = data instanceof Uint8Array ? data : new TextEncoder().encode(data)
       const view = (byteData.byteOffset === 0 && byteData.byteLength === byteData.buffer.byteLength)
-        ? byteData
-        : byteData.slice()
+        ? byteData : byteData.slice()
       const blob = new Blob([view.buffer as ArrayBuffer], { type: "audio/ogg" })
       const url = URL.createObjectURL(blob)
 
-      setFiles(prev => prev.map(f => 
-        f.id === audioFile.id ? { 
-          ...f, 
-          compressedUrl: url,
-          compressedSize: blob.size,
-          progress: 100,
-          status: 'completed' as const
-        } : f
+      setFiles(prev => prev.map(f =>
+        f.id === audioFile.id ? { ...f, compressedUrl: url, compressedSize: blob.size, progress: 100, status: "completed" } : f
       ))
     } catch (err) {
+      ffmpeg.off("progress", () => {})
       const message = err instanceof Error ? err.message : String(err)
-      setFiles(prev => prev.map(f => 
-        f.id === audioFile.id ? { 
-          ...f, 
-          status: 'error' as const,
-          error: message,
-          progress: 0
-        } : f
+      setFiles(prev => prev.map(f =>
+        f.id === audioFile.id ? { ...f, status: "error", error: message, progress: 0 } : f
       ))
+    } finally {
+      try { await ffmpeg.deleteFile(inputName) } catch { /* ignore */ }
+      try { await ffmpeg.deleteFile(outputName) } catch { /* ignore */ }
     }
   }
 
   const handleCompressAll = async () => {
-    if (files.length === 0) {
-      setError("Veuillez ajouter au moins un fichier audio")
-      return
-    }
-
-    if (!ffmpegLoaded) {
-      setError("FFmpeg n'est pas encore chargé, veuillez patienter...")
-      return
-    }
+    if (!ffmpegLoaded) { setGlobalError("FFmpeg n'est pas encore chargé, veuillez patienter..."); return }
+    if (files.length === 0) { setGlobalError("Veuillez ajouter au moins un fichier audio"); return }
 
     setIsCompressing(true)
-    setError(null)
-
-    const pendingFiles = files.filter(f => f.status === 'pending' || f.status === 'error')
-    
-    for (const file of pendingFiles) {
+    setGlobalError(null)
+    for (const file of files.filter(f => f.status === "pending" || f.status === "error")) {
       await compressFile(file)
     }
-
     setIsCompressing(false)
   }
 
   const downloadAll = () => {
-    files.filter(f => f.compressedUrl).forEach(file => {
-      const a = document.createElement('a')
-      a.href = file.compressedUrl!
-      a.download = `${file.file.name.replace(/\.[^/.]+$/, "")}_compressed.ogg`
-      a.click()
+    files.filter(f => f.compressedUrl).forEach((file, i) => {
+      setTimeout(() => {
+        const a = document.createElement("a")
+        a.href = file.compressedUrl!
+        a.download = `${file.file.name.replace(/\.[^/.]+$/, "")}_compressed.ogg`
+        a.click()
+      }, i * 200)
     })
   }
 
-  const totalOriginalSize = files.reduce((sum, f) => sum + f.originalSize, 0)
-  const totalCompressedSize = files.reduce((sum, f) => sum + (f.compressedSize || 0), 0)
-  const completedCount = files.filter(f => f.status === 'completed').length
+  const totalOriginal = files.reduce((s, f) => s + f.originalSize, 0)
+  const totalCompressed = files.reduce((s, f) => s + (f.compressedSize ?? 0), 0)
+  const completedCount = files.filter(f => f.status === "completed").length
+  const pendingCount = files.filter(f => f.status === "pending" || f.status === "error").length
+  const savings = totalCompressed > 0 ? Math.round((1 - totalCompressed / totalOriginal) * 100) : 0
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-slate-50 w-full via-blue-50 to-indigo-100 dark:from-gray-900 dark:via-slate-900 dark:to-indigo-950 p-4 flex items-center justify-center">
-      <Card className="w-full max-w-4xl shadow-2xl border-0 backdrop-blur-sm bg-white/80 dark:bg-gray-900/80">
-        <CardHeader className="space-y-1 pb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-linear-to-br from-blue-500 to-indigo-600 rounded-lg">
-                <FileAudio className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <CardTitle className="text-2xl font-bold font-bricolage">Audio Compressor</CardTitle>
-                <p className="text-sm text-muted-foreground">Compressez plusieurs fichiers audio en une fois</p>
-              </div>
+    <div className="min-h-screen bg-linear-to-br from-background via-muted/30 to-background flex flex-col">
+      {/* Header */}
+      <header className="sticky top-0 z-10 border-b border-border/50 bg-background/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-blue-500 to-indigo-600 shadow-sm">
+              <Music2 className="h-4 w-4 text-white" />
             </div>
-            {files.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={clearAll}>
-                <Trash2 className="w-4 h-4 mr-2" />
-                Tout effacer
-              </Button>
+            <span className="font-bricolage text-base font-semibold tracking-tight">Audio Compressor</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {!ffmpegLoaded && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Chargement FFmpeg…
+              </span>
             )}
+            <ThemeToggle />
           </div>
-        </CardHeader>
+        </div>
+      </header>
 
-        <CardContent className="space-y-6">
-          {/* Zone de drop */}
-          <div
-            onDrop={handleFileDrop}
-            onDragOver={(e) => e.preventDefault()}
-            onClick={() => fileInputRef.current?.click()}
-            className="relative border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 transition-all duration-200 group"
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="audio/*"
-              multiple
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <div className="space-y-3">
-              <div className="mx-auto w-16 h-16 bg-linear-to-br from-blue-100 to-indigo-100 dark:from-blue-900 dark:to-indigo-900 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Upload className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div className="space-y-1">
-                <p className="font-medium text-gray-700 dark:text-gray-300">
-                  Glissez-déposez ou cliquez pour sélectionner
-                </p>
-                <p className="text-xs text-gray-500">Formats supportés : MP3, WAV, OGG, M4A, FLAC (plusieurs fichiers)</p>
-              </div>
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-4 p-4">
+        {/* Drop zone */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          onDrop={handleDrop}
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+          onDragLeave={() => setIsDragging(false)}
+          onClick={() => fileInputRef.current?.click()}
+          className={`relative cursor-pointer rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-200
+            ${isDragging
+              ? "border-blue-500 bg-blue-500/5 scale-[1.01]"
+              : "border-border hover:border-blue-400 hover:bg-muted/40"
+            }`}
+        >
+          <input ref={fileInputRef} type="file" accept="audio/*" multiple onChange={handleFileSelect} className="hidden" />
+          <div className="flex flex-col items-center gap-3">
+            <motion.div
+              animate={isDragging ? { scale: 1.15, rotate: -4 } : { scale: 1, rotate: 0 }}
+              transition={{ type: "spring", stiffness: 300 }}
+              className="flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-blue-100 to-indigo-100 dark:from-blue-900/40 dark:to-indigo-900/40"
+            >
+              <Upload className="h-7 w-7 text-blue-600 dark:text-blue-400" />
+            </motion.div>
+            <div>
+              <p className="font-medium text-foreground">
+                {isDragging ? "Déposez ici" : "Glissez-déposez ou cliquez pour sélectionner"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">MP3, WAV, OGG, M4A, FLAC — plusieurs fichiers acceptés</p>
             </div>
           </div>
+        </motion.div>
 
-          {/* Liste des fichiers */}
+        {/* File list */}
+        <AnimatePresence initial={false}>
           {files.length > 0 && (
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {files.map(audioFile => (
-                <div key={audioFile.id} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg space-y-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <FileAudio className="w-4 h-4 text-blue-500 shrink-0" />
-                        <p className="font-medium text-sm text-gray-900 dark:text-white truncate">
-                          {audioFile.file.name}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-600 dark:text-gray-400">
-                        <span>{formatBytes(audioFile.originalSize)}</span>
-                        {audioFile.compressedSize && (
-                          <>
-                            <span>→</span>
-                            <span className="text-green-600 dark:text-green-400 font-semibold">
-                              {formatBytes(audioFile.compressedSize)}
-                            </span>
-                            <span className="text-blue-600 dark:text-blue-400">
-                              (-{Math.round((1 - audioFile.compressedSize / audioFile.originalSize) * 100)}%)
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {audioFile.status === 'completed' && audioFile.compressedUrl && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8"
-                          asChild
-                        >
-                          <a href={audioFile.compressedUrl} download={`${audioFile.file.name.replace(/\.[^/.]+$/, "")}_compressed.ogg`}>
-                            <Download className="w-4 h-4" />
-                          </a>
-                        </Button>
-                      )}
-                      {audioFile.status === 'completed' && <CheckCircle2 className="w-5 h-5 text-green-600" />}
-                      {audioFile.status === 'pending' && (
-                        <Button size="sm" variant="ghost" onClick={() => removeFile(audioFile.id)}>
-                          <X className="w-4 h-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {audioFile.status === 'compressing' && (
-                    <div className="space-y-1">
-                      <Progress value={audioFile.progress} className="h-1.5" />
-                      <p className="text-xs text-center text-gray-500">{audioFile.progress}%</p>
-                    </div>
-                  )}
-                  
-                  {audioFile.status === 'error' && (
-                    <Alert variant="destructive" className="py-2 ">
-                      <AlertDescription className="text-xs">{audioFile.error}</AlertDescription>
-                    </Alert>
-                  )}
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="space-y-2 overflow-hidden"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-muted-foreground">
+                  {files.length} fichier{files.length > 1 ? "s" : ""}
+                </span>
+                <Button variant="ghost" size="sm" onClick={clearAll} className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
+                  <Trash2 className="mr-1.5 h-3 w-3" />
+                  Tout effacer
+                </Button>
+              </div>
 
-                  {audioFile.status === 'completed' && audioFile.compressedUrl && (
-                    <audio controls src={audioFile.compressedUrl} className="w-full h-8" />
-                  )}
-                </div>
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                <AnimatePresence initial={false}>
+                  {files.map(audioFile => (
+                    <motion.div
+                      key={audioFile.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10, height: 0, marginBottom: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className={`rounded-xl border-l-4 bg-card p-3.5 shadow-sm ring-1 ring-border/50 ${STATUS_STYLES[audioFile.status]}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        {/* Icon + name */}
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg
+                            ${audioFile.status === "completed" ? "bg-emerald-100 dark:bg-emerald-900/40" :
+                              audioFile.status === "error"     ? "bg-red-100 dark:bg-red-900/40" :
+                              audioFile.status === "compressing" ? "bg-blue-100 dark:bg-blue-900/40" :
+                              "bg-muted"}`}
+                          >
+                            {audioFile.status === "completed" && <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
+                            {audioFile.status === "error"     && <AlertCircle  className="h-4 w-4 text-destructive" />}
+                            {audioFile.status === "compressing" && <Loader2    className="h-4 w-4 animate-spin text-blue-500" />}
+                            {audioFile.status === "pending"   && <FileAudio    className="h-4 w-4 text-muted-foreground" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-foreground">{audioFile.file.name}</p>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <span>{formatBytes(audioFile.originalSize)}</span>
+                              {audioFile.compressedSize && (
+                                <>
+                                  <span className="opacity-40">→</span>
+                                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{formatBytes(audioFile.compressedSize)}</span>
+                                  <span className="rounded-full bg-blue-100 px-1.5 py-0.5 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                    -{Math.round((1 - audioFile.compressedSize / audioFile.originalSize) * 100)}%
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1 shrink-0">
+                          {audioFile.status === "completed" && audioFile.compressedUrl && (
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 hover:bg-emerald-100 dark:hover:bg-emerald-900/40" asChild>
+                              <a href={audioFile.compressedUrl} download={`${audioFile.file.name.replace(/\.[^/.]+$/, "")}-c.ogg`}>
+                                <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                              </a>
+                            </Button>
+                          )}
+                          {(audioFile.status === "pending" || audioFile.status === "error") && (
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => removeFile(audioFile.id)}>
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      {audioFile.status === "compressing" && (
+                        <div className="mt-2.5 space-y-1">
+                          <Progress value={audioFile.progress} className="h-1" />
+                          <p className="text-right text-xs text-muted-foreground">{audioFile.progress}%</p>
+                        </div>
+                      )}
+
+                      {/* Error */}
+                      {audioFile.status === "error" && (
+                        <p className="mt-2 text-xs text-destructive">{audioFile.error}</p>
+                      )}
+
+                      {/* Audio player */}
+                      {audioFile.status === "completed" && audioFile.compressedUrl && (
+                        <audio controls src={audioFile.compressedUrl} className="mt-2.5 h-8 w-full" />
+                      )}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Stats */}
+        <AnimatePresence>
+          {completedCount > 0 && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.97 }}
+            >
+              <Card className="border-emerald-200/60 bg-linear-to-br from-emerald-50/60 to-teal-50/40 dark:border-emerald-800/40 dark:from-emerald-950/30 dark:to-teal-950/20">
+                <CardContent className="grid grid-cols-3 divide-x divide-border/50 py-4">
+                  {[
+                    { label: "Avant", value: formatBytes(totalOriginal), color: "text-foreground" },
+                    { label: "Après",  value: formatBytes(totalCompressed), color: "text-emerald-600 dark:text-emerald-400" },
+                    { label: "Économie", value: `${savings}%`, color: "text-blue-600 dark:text-blue-400" },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="flex flex-col items-center gap-0.5 px-4">
+                      <span className="text-xs text-muted-foreground">{label}</span>
+                      <span className={`text-lg font-bold ${color}`}>{value}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Settings */}
+        <Card className="border-border/60">
+          <CardContent className="pt-4 space-y-4">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+              Paramètres de compression
+            </div>
+
+            {/* Preset selector */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              {(Object.entries(PRESETS) as [PresetKey, PresetConfig][]).map(([key, p]) => (
+                <button
+                  key={key}
+                  onClick={() => handlePresetChange(key)}
+                  className={`rounded-lg border px-3 py-2.5 text-left transition-all duration-150
+                    ${preset === key
+                      ? "border-blue-500 bg-blue-500/10 ring-1 ring-blue-500/30"
+                      : "border-border bg-muted/40 hover:border-border/80 hover:bg-muted"
+                    }`}
+                >
+                  <p className={`text-xs font-semibold ${preset === key ? "text-blue-600 dark:text-blue-400" : "text-foreground"}`}>
+                    {p.label}
+                  </p>
+                  <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground line-clamp-2">
+                    {p.description}
+                  </p>
+                </button>
               ))}
             </div>
-          )}
 
-          {/* Statistiques globales */}
-          {completedCount > 0 && (
-            <div className="grid grid-cols-3 gap-3 p-4 bg-linear-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 rounded-lg border border-green-200 dark:border-green-800">
-              <div className="text-center">
-                <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Total avant</p>
-                <p className="font-bold text-gray-900 dark:text-white">{formatBytes(totalOriginalSize)}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Total après</p>
-                <p className="font-bold text-green-600 dark:text-green-400">{formatBytes(totalCompressedSize)}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Économie</p>
-                <p className="font-bold text-blue-600 dark:text-blue-400">
-                  {totalCompressedSize > 0 ? Math.round((1 - totalCompressedSize / totalOriginalSize) * 100) : 0}%
-                </p>
-              </div>
-            </div>
-          )}
+            {/* Custom controls */}
+            <AnimatePresence>
+              {preset === "custom" && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid gap-4 border-t border-border/50 pt-4 sm:grid-cols-3">
+                    {/* Bitrate */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-medium text-muted-foreground">Bitrate</label>
+                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">{bitrate} kb/s</span>
+                      </div>
+                      <Slider value={[bitrate]} onValueChange={v => setBitrate(v[0])} min={16} max={192} step={8} className="w-full" />
+                      <div className="flex justify-between text-[10px] text-muted-foreground">
+                        <span>16</span><span>192 kb/s</span>
+                      </div>
+                    </div>
 
-          {/* Options de compression */}
-          <div className="space-y-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-            <div className="flex items-center gap-2 mb-3">
-              <Settings className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-              <h3 className="font-semibold text-gray-900 dark:text-white">Paramètres de compression</h3>
-            </div>
+                    {/* Sample rate */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">Fréquence</label>
+                      <Select value={sampleRate.toString()} onValueChange={v => setSampleRate(parseInt(v))}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="8000">8 kHz — Téléphone</SelectItem>
+                          <SelectItem value="12000">12 kHz — Voix</SelectItem>
+                          <SelectItem value="16000">16 kHz — Podcast</SelectItem>
+                          <SelectItem value="22050">22 kHz — Radio</SelectItem>
+                          <SelectItem value="44100">44.1 kHz — CD</SelectItem>
+                          <SelectItem value="48000">48 kHz — Studio</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Preset de qualité
-              </label>
-              <Select value={preset} onValueChange={handlePresetChange}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent >
-                  {Object.entries(PRESETS).map(([key, value]) => (
-                    <SelectItem className="font-sans" key={key} value={key}>
-                      {value.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {preset === "custom" && (
-              <div className="space-y-4 pt-2 border-t border-gray-200 dark:border-gray-700">
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Bitrate audio
-                    </label>
-                    <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                      {bitrate} kb/s
-                    </span>
+                    {/* Channels */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">Canaux</label>
+                      <Select value={channels.toString()} onValueChange={v => setChannels(parseInt(v) as 1 | 2)}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">Mono (1 canal)</SelectItem>
+                          <SelectItem value="2">Stéréo (2 canaux)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <Slider
-                    value={[bitrate]}
-                    onValueChange={(v) => setBitrate(v[0])}
-                    min={16}
-                    max={192}
-                    step={8}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>16 kb/s</span>
-                    <span>192 kb/s</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Fréquence d&apos;échantillonnage
-                  </label>
-                  <Select value={sampleRate.toString()} onValueChange={(v: string) => setSampleRate(parseInt(v))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="8000">8 kHz (Téléphone)</SelectItem>
-                      <SelectItem value="12000">12 kHz (Voix basse)</SelectItem>
-                      <SelectItem value="16000">16 kHz (Podcast)</SelectItem>
-                      <SelectItem value="22050">22.05 kHz (Radio)</SelectItem>
-                      <SelectItem value="44100">44.1 kHz (CD)</SelectItem>
-                      <SelectItem value="48000">48 kHz (Studio)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Canaux audio
-                  </label>
-                  <Select value={channels.toString()} onValueChange={(v: string) => setChannels(parseInt(v) as 1 | 2)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">Mono (1 canal)</SelectItem>
-                      <SelectItem value="2">Stéréo (2 canaux)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-
-            {preset !== "custom" && (
-              <div className="bg-blue-50 flex gap-4 items-center px-3 py-4 rounded-xl border dark:bg-blue-500/30 border-blue-200 dark:border-blue-800">
-                <Info  className="h-4 w-4 text-blue-600 " />
-                <p className="text-sm font-mono text-blue-600 dark:text-blue-300">
-                  {bitrate} kb/s · {sampleRate / 1000} kHz · {channels === 1 ? "Mono" : "Stéréo"}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Boutons d'action */}
-          <div className="flex gap-3">
-            <Button
-              onClick={handleCompressAll}
-              disabled={files.length === 0 || isCompressing || !ffmpegLoaded}
-              className="flex-1 h-12 text-base font-semibold bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
-              size="lg"
-            >
-              {isCompressing ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
-                  Compression en cours...
-                </>
-              ) : !ffmpegLoaded ? (
-                <>Chargement de FFmpeg...</>
-              ) : (
-                <>
-                  <Zap className="w-5 h-5 mr-2" />
-                  Compresser tout ({files.filter(f => f.status === 'pending' || f.status === 'error').length})
-                </>
+                </motion.div>
               )}
-            </Button>
+            </AnimatePresence>
 
-            {completedCount > 0 && (
-              <Button
-                onClick={downloadAll}
-                className="h-12 bg-green-600 hover:bg-green-700"
-                size="lg"
-              >
-                <Download className="w-5 h-5 mr-2" />
-                Télécharger tout ({completedCount})
-              </Button>
+            {/* Info bar for non-custom presets */}
+            {preset !== "custom" && (
+              <div className="flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2.5">
+                <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <p className="text-xs font-mono text-muted-foreground">
+                  {bitrate} kb/s · {sampleRate >= 1000 ? `${sampleRate / 1000} kHz` : `${sampleRate} Hz`} · {channels === 1 ? "Mono" : "Stéréo"} · OGG Vorbis
+                </p>
+              </div>
             )}
-          </div>
+          </CardContent>
+        </Card>
 
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+        {/* Action buttons */}
+        <div className="flex gap-3">
+          <Button
+            onClick={handleCompressAll}
+            disabled={files.length === 0 || isCompressing || !ffmpegLoaded}
+            size="lg"
+            className="flex-1 h-11 bg-linear-to-r from-blue-600 to-indigo-600 font-semibold text-white shadow-md hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+          >
+            {isCompressing ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Compression en cours…</>
+            ) : !ffmpegLoaded ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Chargement FFmpeg…</>
+            ) : (
+              <><Zap className="mr-2 h-4 w-4" />Compresser {pendingCount > 0 ? `(${pendingCount})` : "tout"}</>
+            )}
+          </Button>
+
+          <AnimatePresence>
+            {completedCount > 0 && (
+              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
+                <Button
+                  onClick={downloadAll}
+                  size="lg"
+                  className="h-11 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Tout télécharger ({completedCount})
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Global error */}
+        <AnimatePresence>
+          {globalError && (
+            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{globalError}</AlertDescription>
+              </Alert>
+            </motion.div>
           )}
-        </CardContent>
-      </Card>
+        </AnimatePresence>
+      </main>
+
+      {/* Footer */}
+      <footer className="py-4 text-center text-xs text-muted-foreground/60">
+        Traitement 100% local — aucun fichier n&apos;est envoyé sur un serveur
+      </footer>
     </div>
   )
 }
