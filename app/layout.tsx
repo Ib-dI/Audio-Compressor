@@ -31,6 +31,9 @@ export default function RootLayout({
 }>) {
   return (
     <html suppressHydrationWarning lang="fr">
+      <head>
+				<link rel="icon" href="/audio_compressor.png" type="image/png" />
+			</head>
       <body className={`${geistSans.variable} ${bricolageGrotesque.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider
           attribute="class"

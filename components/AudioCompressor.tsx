@@ -1,6 +1,8 @@
 "use client"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import Image from "next/image";
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -279,11 +281,20 @@ export default function AudioCompressor() {
       {/* Header */}
       <header className="sticky top-0 z-10 border-b border-border/50 bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-blue-500 to-indigo-600 shadow-sm">
-              <Music2 className="h-4 w-4 text-white" />
-            </div>
-            <span className="font-bricolage text-base font-semibold tracking-tight">Audio Compressor</span>
+          <div className="">
+          <Link
+						href="/"
+						className="flex items-center gap-2"
+					>
+						<Image
+							src="/audio_compressor.png"
+							alt="Luha Logo"
+							width={32}
+							height={20}
+              className="drop-shadow-sm"
+						/>
+            <span className="font-bricolage text-base font-semibold tracking-tight text-balance">Audio Compressor</span>
+            </Link>
           </div>
           <div className="flex items-center gap-2">
             {!ffmpegLoaded && (
@@ -335,16 +346,26 @@ export default function AudioCompressor() {
         <AnimatePresence initial={false}>
           {files.length > 0 && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+              variants={{
+                hidden: { opacity: 0, height: 0 },
+                visible: {
+                  opacity: 1,
+                  height: "auto",
+                  transition: {
+                    staggerChildren: 0.05,
+                  },
+                },
+              }}
               className="space-y-2 overflow-hidden"
             >
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-muted-foreground">
+                <span className="text-sm font-medium text-muted-foreground tabular-nums">
                   {files.length} fichier{files.length > 1 ? "s" : ""}
                 </span>
-                <Button variant="ghost" size="sm" onClick={clearAll} className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
+                <Button variant="ghost" size="sm" onClick={clearAll} className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground active:scale-[0.96] transition-transform">
                   <Trash2 className="mr-1.5 h-3 w-3" />
                   Tout effacer
                 </Button>
@@ -355,8 +376,10 @@ export default function AudioCompressor() {
                   {files.map(audioFile => (
                     <motion.div
                       key={audioFile.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
+                      variants={{
+                        hidden: { opacity: 0, y: 12, filter: "blur(4px)" },
+                        visible: { opacity: 1, y: 0, filter: "blur(0px)" },
+                      }}
                       exit={{ opacity: 0, x: 10, height: 0, marginBottom: 0 }}
                       transition={{ duration: 0.2 }}
                       className={`rounded-xl border-l-4 bg-card p-3.5 shadow-sm ring-1 ring-border/50 ${STATUS_STYLES[audioFile.status]}`}
@@ -370,14 +393,56 @@ export default function AudioCompressor() {
                               audioFile.status === "compressing" ? "bg-blue-100 dark:bg-blue-900/40" :
                               "bg-muted"}`}
                           >
-                            {audioFile.status === "completed" && <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
-                            {audioFile.status === "error"     && <AlertCircle  className="h-4 w-4 text-destructive" />}
-                            {audioFile.status === "compressing" && <Loader2    className="h-4 w-4 animate-spin text-blue-500" />}
-                            {audioFile.status === "pending"   && <FileAudio    className="h-4 w-4 text-muted-foreground" />}
+                            <AnimatePresence mode="popLayout" initial={false}>
+                              {audioFile.status === "completed" && (
+                                <motion.div
+                                  key="completed"
+                                  initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+                                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                                  exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+                                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
+                                >
+                                  <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                </motion.div>
+                              )}
+                              {audioFile.status === "error" && (
+                                <motion.div
+                                  key="error"
+                                  initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+                                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                                  exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+                                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
+                                >
+                                  <AlertCircle className="h-4 w-4 text-destructive" />
+                                </motion.div>
+                              )}
+                              {audioFile.status === "compressing" && (
+                                <motion.div
+                                  key="compressing"
+                                  initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+                                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                                  exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+                                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
+                                >
+                                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                                </motion.div>
+                              )}
+                              {audioFile.status === "pending" && (
+                                <motion.div
+                                  key="pending"
+                                  initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+                                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                                  exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
+                                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
+                                >
+                                  <FileAudio className="h-4 w-4 text-muted-foreground" />
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium text-foreground">{audioFile.file.name}</p>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
                               <span>{formatBytes(audioFile.originalSize)}</span>
                               {audioFile.compressedSize && (
                                 <>
@@ -395,14 +460,14 @@ export default function AudioCompressor() {
                         {/* Actions */}
                         <div className="flex items-center gap-1 shrink-0">
                           {audioFile.status === "completed" && audioFile.compressedUrl && (
-                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 hover:bg-emerald-100 dark:hover:bg-emerald-900/40" asChild>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 active:scale-[0.96] transition-transform" asChild>
                               <a href={audioFile.compressedUrl} download={`${audioFile.file.name.replace(/\.[^/.]+$/, "")}-c.ogg`}>
                                 <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                               </a>
                             </Button>
                           )}
                           {(audioFile.status === "pending" || audioFile.status === "error") && (
-                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => removeFile(audioFile.id)}>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 active:scale-[0.96] transition-transform" onClick={() => removeFile(audioFile.id)}>
                               <X className="h-3.5 w-3.5" />
                             </Button>
                           )}
@@ -413,13 +478,13 @@ export default function AudioCompressor() {
                       {audioFile.status === "compressing" && (
                         <div className="mt-2.5 space-y-1">
                           <Progress value={audioFile.progress} className="h-1" />
-                          <p className="text-right text-xs text-muted-foreground">{audioFile.progress}%</p>
+                          <p className="text-right text-xs text-muted-foreground tabular-nums">{audioFile.progress}%</p>
                         </div>
                       )}
 
                       {/* Error */}
                       {audioFile.status === "error" && (
-                        <p className="mt-2 text-xs text-destructive">{audioFile.error}</p>
+                        <p className="mt-2 text-xs text-destructive text-pretty">{audioFile.error}</p>
                       )}
 
                       {/* Audio player */}
@@ -449,7 +514,7 @@ export default function AudioCompressor() {
                     { label: "Après",  value: formatBytes(totalCompressed), color: "text-emerald-600 dark:text-emerald-400" },
                     { label: "Économie", value: `${savings}%`, color: "text-blue-600 dark:text-blue-400" },
                   ].map(({ label, value, color }) => (
-                    <div key={label} className="flex flex-col items-center gap-0.5 px-4">
+                    <div key={label} className="flex flex-col items-center gap-0.5 px-4 tabular-nums">
                       <span className="text-xs text-muted-foreground">{label}</span>
                       <span className={`text-lg font-bold ${color}`}>{value}</span>
                     </div>
@@ -474,7 +539,7 @@ export default function AudioCompressor() {
                 <button
                   key={key}
                   onClick={() => handlePresetChange(key)}
-                  className={`rounded-lg border px-3 py-2.5 text-left transition-all duration-150
+                  className={`rounded-lg border px-3 py-2.5 text-left transition-[color,background-color,border-color,box-shadow,transform] duration-150 active:scale-[0.96]
                     ${preset === key
                       ? "border-blue-500 bg-blue-500/10 ring-1 ring-blue-500/30"
                       : "border-border bg-muted/40 hover:border-border/80 hover:bg-muted"
@@ -483,7 +548,7 @@ export default function AudioCompressor() {
                   <p className={`text-xs font-semibold ${preset === key ? "text-blue-600 dark:text-blue-400" : "text-foreground"}`}>
                     {p.label}
                   </p>
-                  <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground line-clamp-2">
+                  <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground line-clamp-2 text-pretty">
                     {p.description}
                   </p>
                 </button>
@@ -504,10 +569,10 @@ export default function AudioCompressor() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-medium text-muted-foreground">Bitrate</label>
-                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">{bitrate} kb/s</span>
+                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 tabular-nums">{bitrate} kb/s</span>
                       </div>
                       <Slider value={[bitrate]} onValueChange={v => setBitrate(v[0])} min={16} max={192} step={8} className="w-full" />
-                      <div className="flex justify-between text-[10px] text-muted-foreground">
+                      <div className="flex justify-between text-[10px] text-muted-foreground tabular-nums">
                         <span>16</span><span>192 kb/s</span>
                       </div>
                     </div>
@@ -516,10 +581,10 @@ export default function AudioCompressor() {
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-muted-foreground">Fréquence</label>
                       <Select value={sampleRate.toString()} onValueChange={v => setSampleRate(parseInt(v))}>
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
+                        <SelectTrigger className="h-8 text-xs active:scale-[0.96] transition-transform">
+                          <SelectValue className="tabular-nums" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="tabular-nums">
                           <SelectItem value="8000">8 kHz — Téléphone</SelectItem>
                           <SelectItem value="12000">12 kHz — Voix</SelectItem>
                           <SelectItem value="16000">16 kHz — Podcast</SelectItem>
@@ -534,10 +599,10 @@ export default function AudioCompressor() {
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-muted-foreground">Canaux</label>
                       <Select value={channels.toString()} onValueChange={v => setChannels(parseInt(v) as 1 | 2)}>
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
+                        <SelectTrigger className="h-8 text-xs active:scale-[0.96] transition-transform">
+                          <SelectValue className="tabular-nums" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="tabular-nums">
                           <SelectItem value="1">Mono (1 canal)</SelectItem>
                           <SelectItem value="2">Stéréo (2 canaux)</SelectItem>
                         </SelectContent>
@@ -552,7 +617,7 @@ export default function AudioCompressor() {
             {preset !== "custom" && (
               <div className="flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2.5">
                 <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <p className="text-xs font-mono text-muted-foreground">
+                <p className="text-xs font-mono text-muted-foreground tabular-nums">
                   {bitrate} kb/s · {sampleRate >= 1000 ? `${sampleRate / 1000} kHz` : `${sampleRate} Hz`} · {channels === 1 ? "Mono" : "Stéréo"} · OGG Vorbis
                 </p>
               </div>
