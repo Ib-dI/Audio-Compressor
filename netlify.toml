@@ -1,0 +1,9 @@
+[build]
+  command = "bun run build"
+  publish = "out"
+
+# Hashed build assets never change: let browsers cache them for a year
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
