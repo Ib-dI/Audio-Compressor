@@ -309,7 +309,11 @@ export default function AudioCompressor() {
             aria-describedby="formats"
             onDrop={handleDrop}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
-            onDragLeave={() => setIsDragging(false)}
+            onDragLeave={(e) => {
+              // dragleave also fires when the pointer moves onto a child — ignore those
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+              setIsDragging(false)
+            }}
             onClick={() => fileInputRef.current?.click()}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click() }
@@ -364,8 +368,8 @@ export default function AudioCompressor() {
                         key={audioFile.id}
                         initial={{ opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0 }}
-                        className="px-4 py-3"
+                        exit={{ opacity: 0, height: 0, paddingTop: 0, paddingBottom: 0 }}
+                        className="overflow-hidden px-4 py-3"
                       >
                         <div className="flex items-center gap-3">
                           <span className="flex size-4 shrink-0 items-center justify-center">
@@ -441,14 +445,27 @@ export default function AudioCompressor() {
                         )}
 
                         {audioFile.status === "completed" && audioFile.compressedUrl && (
-                          <audio controls src={audioFile.compressedUrl} aria-label={`Écouter ${audioFile.file.name}`} className="mt-2.5 h-8 w-full" />
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            className="overflow-hidden"
+                          >
+                            <audio controls src={audioFile.compressedUrl} aria-label={`Écouter ${audioFile.file.name}`} className="mt-2.5 h-8 w-full" />
+                          </motion.div>
                         )}
                       </motion.li>
                     ))}
                   </AnimatePresence>
                 </ul>
 
+                <AnimatePresence initial={false}>
                 {completedCount > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
                   <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-3">
                     <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
                       <div className="flex gap-1.5">
@@ -469,7 +486,9 @@ export default function AudioCompressor() {
                       Tout télécharger ({completedCount})
                     </Button>
                   </div>
+                  </motion.div>
                 )}
+                </AnimatePresence>
               </motion.div>
             )}
           </AnimatePresence>
