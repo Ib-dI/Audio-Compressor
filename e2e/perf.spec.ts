@@ -4,7 +4,7 @@ import path from "node:path"
 import { BASE_URL } from "../playwright.config"
 
 // Each measurement is the median of RUNS tries, to absorb CI runner noise
-const RUNS = 3
+const RUNS = 5
 const FIXTURE = path.join(__dirname, "fixtures", "voix-reference.wav")
 
 const PRESETS = {
@@ -44,9 +44,32 @@ function readVorbisHeader(bytes: Uint8Array) {
   return { channels: view.getUint8(4), sampleRate: view.getUint32(5, true) }
 }
 
+// Times are taken inside the page on every frame: Playwright's own polling
+// (100 ms to 1 s) would be coarser than what we measure
+async function pageNow(page: Page) {
+  return page.evaluate(() => performance.now())
+}
+
+const PAGE_WAIT = { polling: "raf", timeout: 2 * 60 * 1000 } as const
+
+// Returns the time since navigation start at which FFmpeg became ready
 async function waitForFFmpeg(page: Page) {
-  await expect(page.getByText("Chargement FFmpeg…")).toHaveCount(0, { timeout: 2 * 60 * 1000 })
+  const handle = await page.waitForFunction(
+    () => document.body.textContent?.includes("Chargement FFmpeg…") ? null : performance.now(),
+    undefined,
+    PAGE_WAIT
+  )
   await expect(page.getByText(/Erreur FFmpeg/)).toHaveCount(0)
+  return handle.jsonValue() as Promise<number>
+}
+
+async function waitForDownloads(page: Page, count: number) {
+  const handle = await page.waitForFunction(
+    n => document.querySelectorAll('a[download$=".ogg"]').length >= n ? performance.now() : null,
+    count,
+    PAGE_WAIT
+  )
+  return handle.jsonValue() as Promise<number>
 }
 
 // Cold load in a fresh context: no cache, so the wasm is fetched every time
@@ -61,10 +84,8 @@ async function measureLoad(browser: Browser) {
     }
   })
 
-  const start = Date.now()
   await page.goto("/")
-  await waitForFFmpeg(page)
-  const loadMs = Date.now() - start
+  const loadMs = await waitForFFmpeg(page)
 
   const jsBytes = (await Promise.all(scriptSizes)).reduce((a, b) => a + b, 0)
   await context.close()
@@ -89,13 +110,13 @@ test("performance et sortie de la compression", async ({ browser, page }) => {
     const times = []
     for (let i = 0; i < RUNS; i++) {
       await page.locator('input[type="file"]').setInputFiles(FIXTURE)
-      const start = Date.now()
+      const start = await pageNow(page)
       await page.getByRole("button", { name: /^Compresser/ }).click()
       compressed++
-      await expect(downloads).toHaveCount(compressed, { timeout: 2 * 60 * 1000 })
-      times.push(Date.now() - start)
+      const end = await waitForDownloads(page, compressed)
+      times.push(end - start)
     }
-    compressMs[key] = median(times)
+    compressMs[key] = Math.round(median(times))
 
     // The output must be a valid Ogg Vorbis file matching the preset, and smaller than the input
     const href = await downloads.last().getAttribute("href")
@@ -111,7 +132,7 @@ test("performance et sortie de la compression", async ({ browser, page }) => {
   }
 
   const results: PerfResults = {
-    loadMs: median(loads.map(l => l.loadMs)),
+    loadMs: Math.round(median(loads.map(l => l.loadMs))),
     jsBytes: loads[0].jsBytes,
     compressMs,
   }

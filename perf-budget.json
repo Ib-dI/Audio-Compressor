@@ -1,13 +1,13 @@
 {
   "tolerance": 0.15,
   "budget": {
-    "loadMs": 3445,
-    "jsBytes": 824247,
+    "loadMs": null,
+    "jsBytes": null,
     "compressMs": {
-      "ultra": 231,
-      "light": 224,
-      "medium": 226,
-      "quality": 828
+      "ultra": null,
+      "light": null,
+      "medium": null,
+      "quality": null
     }
   }
 }
