@@ -28,7 +28,6 @@ import {
   Trash2,
   AlertCircle,
   Loader2,
-  Music2,
   SlidersHorizontal,
   Info,
 } from "lucide-react"
@@ -106,22 +105,8 @@ export default function AudioCompressor() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const ffmpegRef = useRef<FFmpeg | null>(null)
 
-  useEffect(() => {
-    loadFFmpeg()
-    return () => {
-      setFiles(prev => {
-        prev.forEach(f => { if (f.compressedUrl) URL.revokeObjectURL(f.compressedUrl) })
-        return prev
-      })
-    }
-  }, [])
-
-  const loadFFmpeg = async () => {
+  const loadFFmpeg = async (ffmpeg: FFmpeg) => {
     try {
-      if (!ffmpegRef.current) ffmpegRef.current = new FFmpeg()
-      const ffmpeg = ffmpegRef.current
-      if (ffmpeg.loaded) { setFfmpegLoaded(true); return }
-
       let lastError: unknown = null
       for (const config of CDN_CONFIGS) {
         try {
@@ -138,6 +123,20 @@ export default function AudioCompressor() {
       setGlobalError("Erreur FFmpeg : " + message)
     }
   }
+
+  useEffect(() => {
+    // The ref survives Strict Mode's remount, so FFmpeg is only loaded once
+    if (!ffmpegRef.current) {
+      ffmpegRef.current = new FFmpeg()
+      loadFFmpeg(ffmpegRef.current)
+    }
+    return () => {
+      setFiles(prev => {
+        prev.forEach(f => { if (f.compressedUrl) URL.revokeObjectURL(f.compressedUrl) })
+        return prev
+      })
+    }
+  }, [])
 
   const handlePresetChange = (value: string) => {
     const key = value as PresetKey
@@ -264,7 +263,7 @@ export default function AudioCompressor() {
       setTimeout(() => {
         const a = document.createElement("a")
         a.href = file.compressedUrl!
-        a.download = `${file.file.name.replace(/\.[^/.]+$/, "")}_compressed.ogg`
+        a.download = `${file.file.name.replace(/\.[^/.]+$/, "")}-v2.ogg`
         a.click()
       }, i * 200)
     })
