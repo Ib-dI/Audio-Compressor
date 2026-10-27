@@ -1,0 +1,101 @@
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · theme: Cobalt · enrichment: none (live ffmpeg command readout) · nav: N9 · footer: Ft2
+ * tone: utilitarian · anchor hue: cobalt 256
+ * axes: light (warm paper, hue 85) / grotesk-sans / cool accent
+ * pre-emit critique: P4 H5 E4 S5 R5 V4
+ */
+
+/* Shadcn token names are kept so components/ui/* pick up the palette as-is */
+:root {
+  --radius: 0.375rem;
+
+  /* Paper & ink — warm near-white, never #fff / #000 */
+  --background: oklch(97.8% 0.009 85);
+  --foreground: oklch(23% 0.012 60);
+  --card: oklch(99.2% 0.005 85);
+  --card-foreground: oklch(23% 0.012 60);
+  --popover: oklch(99.2% 0.005 85);
+  --popover-foreground: oklch(23% 0.012 60);
+  --primary: oklch(23% 0.012 60);
+  --primary-foreground: oklch(97.8% 0.009 85);
+  --secondary: oklch(95% 0.011 82);
+  --secondary-foreground: oklch(23% 0.012 60);
+  --muted: oklch(95% 0.011 82);
+  --muted-foreground: oklch(46% 0.016 65);
+  --accent: oklch(94% 0.013 82);
+  --accent-foreground: oklch(23% 0.012 60);
+  --destructive: oklch(54% 0.2 27);
+  --border: oklch(89.5% 0.013 80);
+  --input: oklch(62% 0.016 72);
+
+  /* The one signal */
+  --signal: oklch(54% 0.2 258);
+  --signal-foreground: oklch(99% 0.005 85);
+  --ring: oklch(54% 0.2 258);
+  --success: oklch(50% 0.12 155);
+
+  /* Graphite band — the command readout */
+  --graphite: oklch(23% 0.01 60);
+  --graphite-foreground: oklch(94% 0.01 80);
+  --graphite-muted: oklch(70% 0.014 70);
+  --graphite-signal: oklch(74% 0.14 256);
+
+  --chart-1: oklch(54% 0.2 258);
+  --chart-2: oklch(50% 0.12 155);
+  --chart-3: oklch(46% 0.016 65);
+  --chart-4: oklch(74% 0.14 256);
+  --chart-5: oklch(70% 0.014 70);
+  --sidebar: oklch(96.5% 0.01 84);
+  --sidebar-foreground: oklch(23% 0.012 60);
+  --sidebar-primary: oklch(54% 0.2 258);
+  --sidebar-primary-foreground: oklch(99% 0.005 85);
+  --sidebar-accent: oklch(94% 0.013 82);
+  --sidebar-accent-foreground: oklch(23% 0.012 60);
+  --sidebar-border: oklch(89.5% 0.013 80);
+  --sidebar-ring: oklch(54% 0.2 258);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark {
+  --background: oklch(17% 0.014 260);
+  --foreground: oklch(95% 0.006 255);
+  --card: oklch(20% 0.015 260);
+  --card-foreground: oklch(95% 0.006 255);
+  --popover: oklch(21% 0.015 260);
+  --popover-foreground: oklch(95% 0.006 255);
+  --primary: oklch(95% 0.006 255);
+  --primary-foreground: oklch(20% 0.015 260);
+  --secondary: oklch(24% 0.016 259);
+  --secondary-foreground: oklch(95% 0.006 255);
+  --muted: oklch(24% 0.016 259);
+  --muted-foreground: oklch(70% 0.015 257);
+  --accent: oklch(26% 0.017 259);
+  --accent-foreground: oklch(95% 0.006 255);
+  --destructive: oklch(68% 0.18 24);
+  --border: oklch(31% 0.016 258);
+  --input: oklch(52% 0.016 258);
+
+  --signal: oklch(70% 0.15 256);
+  --signal-foreground: oklch(16% 0.02 260);
+  --ring: oklch(70% 0.15 256);
+  --success: oklch(76% 0.13 155);
+
+  --graphite: oklch(12.5% 0.012 260);
+  --graphite-foreground: oklch(93% 0.008 255);
+  --graphite-muted: oklch(64% 0.015 257);
+  --graphite-signal: oklch(74% 0.14 256);
+
+  --chart-1: oklch(70% 0.15 256);
+  --chart-2: oklch(76% 0.13 155);
+  --chart-3: oklch(70% 0.015 257);
+  --chart-4: oklch(74% 0.14 256);
+  --chart-5: oklch(64% 0.015 257);
+  --sidebar: oklch(20% 0.015 260);
+  --sidebar-foreground: oklch(95% 0.006 255);
+  --sidebar-primary: oklch(70% 0.15 256);
+  --sidebar-primary-foreground: oklch(16% 0.02 260);
+  --sidebar-accent: oklch(26% 0.017 259);
+  --sidebar-accent-foreground: oklch(95% 0.006 255);
+  --sidebar-border: oklch(31% 0.016 258);
+  --sidebar-ring: oklch(70% 0.15 256);
+}
