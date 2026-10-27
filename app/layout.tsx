@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Bricolage_Grotesque } from "next/font/google";
+import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
@@ -8,10 +8,10 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-const bricolageGrotesque = Bricolage_Grotesque({
-  variable: "--font-bricolage-grotesque",
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["500", "600"],
 });
 
 const geistMono = Geist_Mono({
@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Audio Compressor",
-  description: "App de compression de taille fichiers audio",
+  description: "Compressez vos fichiers audio directement dans le navigateur, sans les envoyer sur un serveur.",
 };
 
 export default function RootLayout({
@@ -34,7 +34,7 @@ export default function RootLayout({
       <head>
 				<link rel="icon" href="/audio_compressor.png" type="image/png" />
 			</head>
-      <body className={`${geistSans.variable} ${bricolageGrotesque.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${spaceGrotesk.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

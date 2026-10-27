@@ -4,7 +4,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import Image from "next/image";
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -17,19 +16,17 @@ import { Slider } from "@/components/ui/slider"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { FFmpeg } from "@ffmpeg/ffmpeg"
 import { fetchFile } from "@ffmpeg/util"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion, AnimatePresence, MotionConfig } from "framer-motion"
 import {
   CheckCircle2,
   Download,
   FileAudio,
   Upload,
-  Zap,
   X,
   Trash2,
   AlertCircle,
   Loader2,
-  SlidersHorizontal,
-  Info,
+  Check,
 } from "lucide-react"
 import React, { useEffect, useRef, useState } from "react"
 
@@ -44,11 +41,11 @@ interface PresetConfig {
 type PresetKey = "ultra" | "light" | "medium" | "quality" | "custom"
 
 const PRESETS: Record<PresetKey, PresetConfig> = {
-  ultra:   { bitrate: 16, sampleRate: 12000, channels: 1, label: "Ultra léger", description: "Voix · 16 kb/s · 12 kHz · Mono" },
-  light:   { bitrate: 32, sampleRate: 16000, channels: 1, label: "Léger",       description: "Podcast · 32 kb/s · 16 kHz · Mono" },
-  medium:  { bitrate: 64, sampleRate: 22050, channels: 1, label: "Moyen",       description: "Radio · 64 kb/s · 22 kHz · Mono" },
-  quality: { bitrate: 96, sampleRate: 44100, channels: 2, label: "Qualité",     description: "Stéréo · 96 kb/s · 44 kHz · Stéréo" },
-  custom:  { bitrate: 32, sampleRate: 16000, channels: 1, label: "Personnalisé", description: "Configurer manuellement" },
+  ultra:   { bitrate: 16, sampleRate: 12000, channels: 1, label: "Ultra léger", description: "Voix" },
+  light:   { bitrate: 32, sampleRate: 16000, channels: 1, label: "Léger",       description: "Podcast" },
+  medium:  { bitrate: 64, sampleRate: 22050, channels: 1, label: "Moyen",       description: "Radio" },
+  quality: { bitrate: 96, sampleRate: 44100, channels: 2, label: "Qualité",     description: "Musique" },
+  custom:  { bitrate: 32, sampleRate: 16000, channels: 1, label: "Personnalisé", description: "Sur mesure" },
 }
 
 const CDN_CONFIGS = [
@@ -77,12 +74,7 @@ interface AudioFile {
   error: string | null
 }
 
-const STATUS_STYLES: Record<AudioFile["status"], string> = {
-  pending:    "border-l-border",
-  compressing:"border-l-blue-500",
-  completed:  "border-l-emerald-500",
-  error:      "border-l-destructive",
-}
+const EASE_OUT = [0.16, 1, 0.3, 1] as const
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B"
@@ -275,405 +267,373 @@ export default function AudioCompressor() {
   const pendingCount = files.filter(f => f.status === "pending" || f.status === "error").length
   const savings = totalCompressed > 0 ? Math.round((1 - totalCompressed / totalOriginal) * 100) : 0
 
+  const formatRate = (hz: number) => (hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`)
+  const focusRing = "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+  const hasFiles = files.length > 0
+
   return (
-    <div className="min-h-screen bg-linear-to-br from-background via-muted/30 to-background flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-border/50 bg-background/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-          <div className="">
-          <Link
-						href="/"
-						className="flex items-center gap-2"
-					>
-						<Image
-							src="/audio_compressor.png"
-							alt="Luha Logo"
-							width={32}
-							height={20}
-              className="drop-shadow-sm"
-						/>
-            <span className="font-bricolage text-base font-semibold tracking-tight text-balance">Audio Compressor</span>
-            </Link>
-          </div>
-          <div className="flex items-center gap-2">
-            {!ffmpegLoaded && (
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Chargement FFmpeg…
-              </span>
-            )}
+    <MotionConfig reducedMotion="user" transition={{ duration: 0.2, ease: EASE_OUT }}>
+    <div className="flex min-h-dvh flex-col">
+      {/* N9 · edge-aligned: wordmark left, engine status + theme right */}
+      <header className="border-b border-border">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <Link href="/" className={`flex items-center gap-2.5 rounded-md ${focusRing}`}>
+            <Image src="/audio_compressor.png" alt="" width={28} height={18} />
+            <span className="whitespace-nowrap font-display text-[15px] font-semibold tracking-tight">Audio Compressor</span>
+          </Link>
+          <div className="flex items-center gap-3">
+            <span role="status" className="hidden items-center gap-2 font-mono text-xs uppercase tracking-[0.06em] text-muted-foreground sm:inline-flex">
+              <span className={`size-1.5 rounded-full ${ffmpegLoaded ? "bg-success" : "animate-pulse bg-muted-foreground"}`} />
+              {ffmpegLoaded ? "FFmpeg prêt" : "Chargement FFmpeg…"}
+            </span>
             <ThemeToggle />
           </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 space-y-4 p-4">
-        {/* Drop zone */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          onDrop={handleDrop}
-          onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
-          onDragLeave={() => setIsDragging(false)}
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative cursor-pointer rounded-2xl border-2 border-dashed p-10 text-center transition-all duration-200
-            ${isDragging
-              ? "border-blue-500 bg-blue-500/5 scale-[1.01]"
-              : "border-border hover:border-blue-400 hover:bg-muted/40"
-            }`}
-        >
-          <input ref={fileInputRef} type="file" accept="audio/*" multiple onChange={handleFileSelect} className="hidden" />
-          <div className="flex flex-col items-center gap-3">
-            <motion.div
-              animate={isDragging ? { scale: 1.15, rotate: -4 } : { scale: 1, rotate: 0 }}
-              transition={{ type: "spring", stiffness: 300 }}
-              className="flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-blue-100 to-indigo-100 dark:from-blue-900/40 dark:to-indigo-900/40"
-            >
-              <Upload className="h-7 w-7 text-blue-600 dark:text-blue-400" />
-            </motion.div>
-            <div>
-              <p className="font-medium text-foreground">
-                {isDragging ? "Déposez ici" : "Glissez-déposez ou cliquez pour sélectionner"}
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 pt-10 sm:px-6 sm:pt-12">
+        <h1 className="min-w-0 font-display text-[clamp(1.875rem,2.5vw+1rem,2.625rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-balance wrap-anywhere">
+          Compressez vos audios sans les envoyer.
+        </h1>
+        <p className="mt-3 max-w-[56ch] leading-relaxed text-muted-foreground text-pretty">
+          La conversion tourne dans votre navigateur, avec FFmpeg compilé en WebAssembly.
+          Vos fichiers ne quittent jamais votre machine.
+        </p>
+
+        <div className="mt-8 space-y-4">
+          {/* 1 · Drop */}
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="Ajouter des fichiers audio"
+            aria-describedby="formats"
+            onDrop={handleDrop}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+            onDragLeave={() => setIsDragging(false)}
+            onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click() }
+            }}
+            className={`group flex cursor-pointer items-center gap-4 rounded-xl border border-dashed px-5 transition-[background-color,border-color] duration-150 ${focusRing}
+              ${hasFiles ? "py-4" : "py-8 sm:py-10"}
+              ${isDragging
+                ? "border-signal bg-signal/5"
+                : "border-input bg-card hover:border-foreground/60 hover:bg-muted/50"
+              }`}
+          >
+            <input ref={fileInputRef} type="file" accept="audio/*" multiple onChange={handleFileSelect} className="hidden" />
+            <span className={`flex size-10 shrink-0 items-center justify-center rounded-lg border bg-background transition-colors duration-150 ${isDragging ? "border-signal text-signal" : "border-border text-muted-foreground group-hover:text-foreground"}`}>
+              <Upload className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">
+                {isDragging ? "Relâchez pour ajouter" : hasFiles ? "Ajouter d'autres fichiers" : "Déposez vos fichiers audio"}
               </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">MP3, WAV, OGG, M4A, FLAC — plusieurs fichiers acceptés</p>
+              <p id="formats" className="mt-0.5 text-xs text-muted-foreground">
+                ou cliquez pour parcourir · MP3, WAV, OGG, M4A, FLAC
+              </p>
             </div>
+            <span className="hidden shrink-0 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors duration-150 group-hover:border-foreground/25 sm:inline">
+              Parcourir
+            </span>
           </div>
-        </motion.div>
 
-        {/* File list */}
-        <AnimatePresence initial={false}>
-          {files.length > 0 && (
-            <motion.div
-              initial="hidden"
-              animate="visible"
-              exit="hidden"
-              variants={{
-                hidden: { opacity: 0, height: 0 },
-                visible: {
-                  opacity: 1,
-                  height: "auto",
-                  transition: {
-                    staggerChildren: 0.05,
-                  },
-                },
-              }}
-              className="space-y-2 overflow-hidden"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-muted-foreground tabular-nums">
-                  {files.length} fichier{files.length > 1 ? "s" : ""}
-                </span>
-                <Button variant="ghost" size="sm" onClick={clearAll} className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground active:scale-[0.96] transition-transform">
-                  <Trash2 className="mr-1.5 h-3 w-3" />
-                  Tout effacer
-                </Button>
-              </div>
+          {/* 2 · Files */}
+          <AnimatePresence initial={false}>
+            {hasFiles && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                className="overflow-hidden rounded-xl border border-border bg-card"
+              >
+                <div className="flex items-center justify-between border-b border-border py-2 pl-4 pr-2">
+                  <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-muted-foreground tabular-nums">
+                    {files.length} fichier{files.length > 1 ? "s" : ""}
+                  </h2>
+                  <Button variant="ghost" size="sm" onClick={clearAll} disabled={isCompressing} className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
+                    <Trash2 className="size-3" />
+                    Tout effacer
+                  </Button>
+                </div>
 
-              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                <AnimatePresence initial={false}>
-                  {files.map(audioFile => (
-                    <motion.div
-                      key={audioFile.id}
-                      variants={{
-                        hidden: { opacity: 0, y: 12, filter: "blur(4px)" },
-                        visible: { opacity: 1, y: 0, filter: "blur(0px)" },
-                      }}
-                      exit={{ opacity: 0, x: 10, height: 0, marginBottom: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className={`rounded-xl border-l-4 bg-card p-3.5 shadow-sm ring-1 ring-border/50 ${STATUS_STYLES[audioFile.status]}`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        {/* Icon + name */}
-                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg
-                            ${audioFile.status === "completed" ? "bg-emerald-100 dark:bg-emerald-900/40" :
-                              audioFile.status === "error"     ? "bg-red-100 dark:bg-red-900/40" :
-                              audioFile.status === "compressing" ? "bg-blue-100 dark:bg-blue-900/40" :
-                              "bg-muted"}`}
-                          >
+                <ul className="max-h-96 divide-y divide-border overflow-y-auto">
+                  <AnimatePresence initial={false}>
+                    {files.map(audioFile => (
+                      <motion.li
+                        key={audioFile.id}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="px-4 py-3"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="flex size-4 shrink-0 items-center justify-center">
                             <AnimatePresence mode="popLayout" initial={false}>
-                              {audioFile.status === "completed" && (
-                                <motion.div
-                                  key="completed"
-                                  initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
-                                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                                  exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
-                                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
-                                >
-                                  <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                                </motion.div>
-                              )}
-                              {audioFile.status === "error" && (
-                                <motion.div
-                                  key="error"
-                                  initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
-                                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                                  exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
-                                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
-                                >
-                                  <AlertCircle className="h-4 w-4 text-destructive" />
-                                </motion.div>
-                              )}
-                              {audioFile.status === "compressing" && (
-                                <motion.div
-                                  key="compressing"
-                                  initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
-                                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                                  exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
-                                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
-                                >
-                                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                                </motion.div>
-                              )}
-                              {audioFile.status === "pending" && (
-                                <motion.div
-                                  key="pending"
-                                  initial={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
-                                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                                  exit={{ opacity: 0, scale: 0.25, filter: "blur(4px)" }}
-                                  transition={{ type: "spring", duration: 0.3, bounce: 0 }}
-                                >
-                                  <FileAudio className="h-4 w-4 text-muted-foreground" />
-                                </motion.div>
-                              )}
+                              <motion.span
+                                key={audioFile.status}
+                                initial={{ opacity: 0, scale: 0.6 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.6 }}
+                                className="flex"
+                              >
+                                {audioFile.status === "completed" && <CheckCircle2 className="size-4 text-success" />}
+                                {audioFile.status === "error" && <AlertCircle className="size-4 text-destructive" />}
+                                {audioFile.status === "compressing" && <Loader2 className="size-4 animate-spin text-signal" />}
+                                {audioFile.status === "pending" && <FileAudio className="size-4 text-muted-foreground" />}
+                              </motion.span>
                             </AnimatePresence>
-                          </div>
+                          </span>
+
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-foreground">{audioFile.file.name}</p>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
+                            <p className="truncate text-sm font-medium">{audioFile.file.name}</p>
+                            <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 font-mono text-xs text-muted-foreground tabular-nums">
                               <span>{formatBytes(audioFile.originalSize)}</span>
                               {audioFile.compressedSize && (
                                 <>
-                                  <span className="opacity-40">→</span>
-                                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{formatBytes(audioFile.compressedSize)}</span>
-                                  <span className="rounded-full bg-blue-100 px-1.5 py-0.5 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                                    -{Math.round((1 - audioFile.compressedSize / audioFile.originalSize) * 100)}%
+                                  <span aria-hidden>→</span>
+                                  <span className="text-foreground">{formatBytes(audioFile.compressedSize)}</span>
+                                  <span className="text-success">
+                                    −{Math.round((1 - audioFile.compressedSize / audioFile.originalSize) * 100)}{" "}%
                                   </span>
                                 </>
                               )}
-                            </div>
+                              {audioFile.status === "compressing" && <span>· {audioFile.progress}{" "}%</span>}
+                            </p>
+                          </div>
+
+                          <div className="flex shrink-0 items-center">
+                            {audioFile.status === "completed" && audioFile.compressedUrl && (
+                              <Button size="icon-sm" variant="ghost" className="text-muted-foreground hover:text-foreground" asChild>
+                                <a
+                                  href={audioFile.compressedUrl}
+                                  download={`${audioFile.file.name.replace(/\.[^/.]+$/, "")}-v2.ogg`}
+                                  aria-label={`Télécharger ${audioFile.file.name}`}
+                                >
+                                  <Download className="size-4" />
+                                </a>
+                              </Button>
+                            )}
+                            {(audioFile.status === "pending" || audioFile.status === "error") && (
+                              <Button
+                                size="icon-sm"
+                                variant="ghost"
+                                className="text-muted-foreground hover:text-foreground"
+                                onClick={() => removeFile(audioFile.id)}
+                                aria-label={`Retirer ${audioFile.file.name}`}
+                              >
+                                <X className="size-4" />
+                              </Button>
+                            )}
                           </div>
                         </div>
 
-                        {/* Actions */}
-                        <div className="flex items-center gap-1 shrink-0">
-                          {audioFile.status === "completed" && audioFile.compressedUrl && (
-                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 active:scale-[0.96] transition-transform" asChild>
-                              <a href={audioFile.compressedUrl} download={`${audioFile.file.name.replace(/\.[^/.]+$/, "")}-c.ogg`}>
-                                <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                              </a>
-                            </Button>
-                          )}
-                          {(audioFile.status === "pending" || audioFile.status === "error") && (
-                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 active:scale-[0.96] transition-transform" onClick={() => removeFile(audioFile.id)}>
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </div>
+                        {audioFile.status === "compressing" && (
+                          <Progress
+                            value={audioFile.progress}
+                            aria-label={`Progression de ${audioFile.file.name}`}
+                            className="mt-2.5 h-0.5 bg-border *:data-[slot=progress-indicator]:bg-signal"
+                          />
+                        )}
+
+                        {audioFile.status === "error" && (
+                          <p className="mt-2 pl-7 text-xs text-destructive text-pretty">{audioFile.error}</p>
+                        )}
+
+                        {audioFile.status === "completed" && audioFile.compressedUrl && (
+                          <audio controls src={audioFile.compressedUrl} aria-label={`Écouter ${audioFile.file.name}`} className="mt-2.5 h-8 w-full" />
+                        )}
+                      </motion.li>
+                    ))}
+                  </AnimatePresence>
+                </ul>
+
+                {completedCount > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-3">
+                    <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
+                      <div className="flex gap-1.5">
+                        <dt className="text-muted-foreground">Avant</dt>
+                        <dd>{formatBytes(totalOriginal)}</dd>
                       </div>
-
-                      {/* Progress bar */}
-                      {audioFile.status === "compressing" && (
-                        <div className="mt-2.5 space-y-1">
-                          <Progress value={audioFile.progress} className="h-1" />
-                          <p className="text-right text-xs text-muted-foreground tabular-nums">{audioFile.progress}%</p>
-                        </div>
-                      )}
-
-                      {/* Error */}
-                      {audioFile.status === "error" && (
-                        <p className="mt-2 text-xs text-destructive text-pretty">{audioFile.error}</p>
-                      )}
-
-                      {/* Audio player */}
-                      {audioFile.status === "completed" && audioFile.compressedUrl && (
-                        <audio controls src={audioFile.compressedUrl} className="mt-2.5 h-8 w-full" />
-                      )}
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Stats */}
-        <AnimatePresence>
-          {completedCount > 0 && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.97 }}
-            >
-              <Card className="border-emerald-200/60 bg-linear-to-br from-emerald-50/60 to-teal-50/40 dark:border-emerald-800/40 dark:from-emerald-950/30 dark:to-teal-950/20">
-                <CardContent className="grid grid-cols-3 divide-x divide-border/50 py-4">
-                  {[
-                    { label: "Avant", value: formatBytes(totalOriginal), color: "text-foreground" },
-                    { label: "Après",  value: formatBytes(totalCompressed), color: "text-emerald-600 dark:text-emerald-400" },
-                    { label: "Économie", value: `${savings}%`, color: "text-blue-600 dark:text-blue-400" },
-                  ].map(({ label, value, color }) => (
-                    <div key={label} className="flex flex-col items-center gap-0.5 px-4 tabular-nums">
-                      <span className="text-xs text-muted-foreground">{label}</span>
-                      <span className={`text-lg font-bold ${color}`}>{value}</span>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Settings */}
-        <Card className="border-border/60">
-          <CardContent className="pt-4 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-              Paramètres de compression
-            </div>
-
-            {/* Preset selector */}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-              {(Object.entries(PRESETS) as [PresetKey, PresetConfig][]).map(([key, p]) => (
-                <button
-                  key={key}
-                  onClick={() => handlePresetChange(key)}
-                  className={`rounded-lg border px-3 py-2.5 text-left transition-[color,background-color,border-color,box-shadow,transform] duration-150 active:scale-[0.96]
-                    ${preset === key
-                      ? "border-blue-500 bg-blue-500/10 ring-1 ring-blue-500/30"
-                      : "border-border bg-muted/40 hover:border-border/80 hover:bg-muted"
-                    }`}
-                >
-                  <p className={`text-xs font-semibold ${preset === key ? "text-blue-600 dark:text-blue-400" : "text-foreground"}`}>
-                    {p.label}
-                  </p>
-                  <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground line-clamp-2 text-pretty">
-                    {p.description}
-                  </p>
-                </button>
-              ))}
-            </div>
-
-            {/* Custom controls */}
-            <AnimatePresence>
-              {preset === "custom" && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="grid gap-4 border-t border-border/50 pt-4 sm:grid-cols-3">
-                    {/* Bitrate */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium text-muted-foreground">Bitrate</label>
-                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 tabular-nums">{bitrate} kb/s</span>
+                      <div className="flex gap-1.5">
+                        <dt className="text-muted-foreground">Après</dt>
+                        <dd>{formatBytes(totalCompressed)}</dd>
                       </div>
-                      <Slider value={[bitrate]} onValueChange={v => setBitrate(v[0])} min={16} max={192} step={8} className="w-full" />
-                      <div className="flex justify-between text-[10px] text-muted-foreground tabular-nums">
-                        <span>16</span><span>192 kb/s</span>
+                      <div className="flex gap-1.5">
+                        <dt className="text-muted-foreground">Gain</dt>
+                        <dd className="text-success">−{savings}{" "}%</dd>
                       </div>
-                    </div>
-
-                    {/* Sample rate */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-muted-foreground">Fréquence</label>
-                      <Select value={sampleRate.toString()} onValueChange={v => setSampleRate(parseInt(v))}>
-                        <SelectTrigger className="h-8 text-xs active:scale-[0.96] transition-transform">
-                          <SelectValue className="tabular-nums" />
-                        </SelectTrigger>
-                        <SelectContent className="tabular-nums">
-                          <SelectItem value="8000">8 kHz — Téléphone</SelectItem>
-                          <SelectItem value="12000">12 kHz — Voix</SelectItem>
-                          <SelectItem value="16000">16 kHz — Podcast</SelectItem>
-                          <SelectItem value="22050">22 kHz — Radio</SelectItem>
-                          <SelectItem value="44100">44.1 kHz — CD</SelectItem>
-                          <SelectItem value="48000">48 kHz — Studio</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Channels */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-muted-foreground">Canaux</label>
-                      <Select value={channels.toString()} onValueChange={v => setChannels(parseInt(v) as 1 | 2)}>
-                        <SelectTrigger className="h-8 text-xs active:scale-[0.96] transition-transform">
-                          <SelectValue className="tabular-nums" />
-                        </SelectTrigger>
-                        <SelectContent className="tabular-nums">
-                          <SelectItem value="1">Mono (1 canal)</SelectItem>
-                          <SelectItem value="2">Stéréo (2 canaux)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    </dl>
+                    <Button onClick={downloadAll} variant="outline" size="sm" className="bg-card">
+                      <Download className="size-3.5" />
+                      Tout télécharger ({completedCount})
+                    </Button>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-            {/* Info bar for non-custom presets */}
-            {preset !== "custom" && (
-              <div className="flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2.5">
-                <Info className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <p className="text-xs font-mono text-muted-foreground tabular-nums">
-                  {bitrate} kb/s · {sampleRate >= 1000 ? `${sampleRate / 1000} kHz` : `${sampleRate} Hz`} · {channels === 1 ? "Mono" : "Stéréo"} · OGG Vorbis
+          {/* 3 · Settings — presets on top, the real ffmpeg command as the card's footer band */}
+          <section aria-labelledby="reglages" className="overflow-hidden rounded-xl border border-border bg-card">
+            <div className="p-4">
+              <h2 id="reglages" className="font-display text-sm font-semibold tracking-tight">Qualité de sortie</h2>
+
+              <div role="group" aria-label="Préréglage" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                {(Object.entries(PRESETS) as [PresetKey, PresetConfig][]).map(([key, p]) => {
+                  const selected = preset === key
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => handlePresetChange(key)}
+                      disabled={isCompressing}
+                      className={`relative rounded-lg border px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow] duration-150 active:not-disabled:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}
+                        ${key === "custom" ? "col-span-2 sm:col-span-1" : ""}
+                        ${selected ? "border-signal bg-signal/5 ring-1 ring-signal" : "border-border hover:border-foreground/40 hover:bg-muted/60"}`}
+                    >
+                      <span className="block truncate text-sm font-medium">{p.label}</span>
+                      {selected && (
+                        <span aria-hidden className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-signal text-signal-foreground">
+                          <Check className="size-2.5" strokeWidth={3} />
+                        </span>
+                      )}
+                      <span className="mt-0.5 flex items-baseline justify-between gap-2 font-mono text-xs text-muted-foreground tabular-nums">
+                        <span className="truncate">{p.description}</span>
+                        {key !== "custom" && <span className="shrink-0">{p.bitrate}k</span>}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <AnimatePresence initial={false}>
+                {preset === "custom" && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-4 grid gap-4 border-t border-border pt-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label id="debit-label" className="text-xs font-medium text-muted-foreground">Débit</label>
+                          <span className="font-mono text-xs tabular-nums">{bitrate} kb/s</span>
+                        </div>
+                        <Slider value={[bitrate]} onValueChange={v => setBitrate(v[0])} min={16} max={192} step={8} aria-labelledby="debit-label" className="w-full" />
+                      </div>
+
+                      <div className="min-w-0 space-y-2">
+                        <label htmlFor="frequence" className="text-xs font-medium text-muted-foreground">Fréquence</label>
+                        <Select value={sampleRate.toString()} onValueChange={v => setSampleRate(parseInt(v))}>
+                          <SelectTrigger id="frequence" className="h-8 w-full text-xs">
+                            <SelectValue className="tabular-nums" />
+                          </SelectTrigger>
+                          <SelectContent className="tabular-nums">
+                            <SelectItem value="8000">8 kHz — Téléphone</SelectItem>
+                            <SelectItem value="12000">12 kHz — Voix</SelectItem>
+                            <SelectItem value="16000">16 kHz — Podcast</SelectItem>
+                            <SelectItem value="22050">22 kHz — Radio</SelectItem>
+                            <SelectItem value="44100">44.1 kHz — CD</SelectItem>
+                            <SelectItem value="48000">48 kHz — Studio</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="min-w-0 space-y-2">
+                        <label htmlFor="canaux" className="text-xs font-medium text-muted-foreground">Canaux</label>
+                        <Select value={channels.toString()} onValueChange={v => setChannels(parseInt(v) as 1 | 2)}>
+                          <SelectTrigger id="canaux" className="h-8 w-full text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1">Mono</SelectItem>
+                            <SelectItem value="2">Stéréo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <div className="bg-graphite px-4 py-3 font-mono text-graphite-foreground">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <p className="text-xs uppercase tracking-[0.06em] text-graphite-muted">Exécuté dans votre navigateur</p>
+                <p className="text-xs text-graphite-muted tabular-nums">
+                  OGG Vorbis · {bitrate} kb/s · {formatRate(sampleRate)} · {channels === 1 ? "mono" : "stéréo"}
                 </p>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <code className="mt-2 flex flex-wrap gap-x-[1ch] text-xs leading-relaxed">
+                <span className="text-graphite-signal">ffmpeg</span>
+                {[
+                  ["-i", "entrée"],
+                  ["-vn", null],
+                  ["-map", "0:a"],
+                  ["-c:a", "libvorbis"],
+                  ["-ac", channels],
+                  ["-ar", sampleRate],
+                  ["-b:a", `${bitrate}k`],
+                  ["-compression_level", 10],
+                ].map(([flag, value]) => (
+                  <span key={flag} className="whitespace-nowrap">
+                    <span className="text-graphite-muted">{flag}</span>
+                    {value !== null && <> {value}</>}
+                  </span>
+                ))}
+                <span>sortie.ogg</span>
+              </code>
+            </div>
+          </section>
 
-        {/* Action buttons */}
-        <div className="flex gap-3">
-          <Button
-            onClick={handleCompressAll}
-            disabled={files.length === 0 || isCompressing || !ffmpegLoaded}
-            size="lg"
-            className="flex-1 h-11 bg-linear-to-r from-blue-600 to-indigo-600 font-semibold text-white shadow-md hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
-          >
-            {isCompressing ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Compression en cours…</>
-            ) : !ffmpegLoaded ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Chargement FFmpeg…</>
-            ) : (
-              <><Zap className="mr-2 h-4 w-4" />Compresser {pendingCount > 0 ? `(${pendingCount})` : "tout"}</>
-            )}
-          </Button>
+          {/* 4 · Run */}
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p role="status" aria-live="polite" className="text-xs text-muted-foreground">
+              {!hasFiles
+                ? "Ajoutez au moins un fichier pour commencer."
+                : pendingCount > 0
+                  ? `${pendingCount} fichier${pendingCount > 1 ? "s" : ""} en attente`
+                  : "Tous les fichiers sont compressés."}
+            </p>
+            <Button
+              onClick={handleCompressAll}
+              disabled={pendingCount === 0 || isCompressing || !ffmpegLoaded}
+              size="lg"
+              className="h-11 w-full bg-signal px-6 font-semibold text-signal-foreground hover:bg-signal/90 focus-visible:ring-ring/40 sm:w-auto sm:min-w-52"
+            >
+              {isCompressing ? (
+                <><Loader2 className="size-4 animate-spin" />Compression en cours…</>
+              ) : !ffmpegLoaded ? (
+                <><Loader2 className="size-4 animate-spin" />Chargement FFmpeg…</>
+              ) : (
+                <>Compresser{pendingCount > 0 ? ` ${pendingCount} fichier${pendingCount > 1 ? "s" : ""}` : ""}</>
+              )}
+            </Button>
+          </div>
 
           <AnimatePresence>
-            {completedCount > 0 && (
-              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
-                <Button
-                  onClick={downloadAll}
-                  size="lg"
-                  className="h-11 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Tout télécharger ({completedCount})
-                </Button>
+            {globalError && (
+              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                <Alert variant="destructive">
+                  <AlertCircle className="size-4" />
+                  <AlertDescription>{globalError}</AlertDescription>
+                </Alert>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
-
-        {/* Global error */}
-        <AnimatePresence>
-          {globalError && (
-            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{globalError}</AlertDescription>
-              </Alert>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </main>
 
-      {/* Footer */}
-      <footer className="py-4 text-center text-xs text-muted-foreground/60">
-        Traitement 100% local — aucun fichier n&apos;est envoyé sur un serveur
+      {/* Ft2 · single line */}
+      <footer className="border-t border-border">
+        <p className="mx-auto max-w-3xl px-4 py-4 text-xs text-muted-foreground sm:px-6">
+          Audio Compressor · Traitement 100{" "}% local, aucun envoi sur un serveur · OGG Vorbis via FFmpeg.wasm
+        </p>
       </footer>
     </div>
+    </MotionConfig>
   )
 }
