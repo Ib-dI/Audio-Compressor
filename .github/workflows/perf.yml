@@ -1,0 +1,59 @@
+name: Perf
+
+# Only when the measured code may have changed, plus a daily run on master
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "components/**"
+      - "hooks/**"
+      - "lib/**"
+      - "e2e/**"
+      - "package.json"
+      - "bun.lock"
+      - "next.config.ts"
+      - "playwright.config.ts"
+      - "perf-budget.json"
+      - ".github/workflows/perf.yml"
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium
+      - name: Benchmark
+        run: bun run test:perf
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f perf-results.json ]; then
+            {
+              echo '### Mesures'
+              echo '```json'
+              cat perf-results.json
+              echo '```'
+              echo '### Budget'
+              echo '```json'
+              cat perf-budget.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results
+          path: |
+            perf-results.json
+            test-results/
+          if-no-files-found: ignore
