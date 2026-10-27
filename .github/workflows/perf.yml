@@ -32,6 +32,26 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
+
+      # On a PR, the base branch is built and served on the same runner, so
+      # compression times are compared on the same CPU
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.base_ref }}
+          path: baseline
+      - name: Serve baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          # Outside the workspace, so the PR's build doesn't type-check it
+          mv baseline "$RUNNER_TEMP/baseline"
+          cd "$RUNNER_TEMP/baseline"
+          bun install --frozen-lockfile
+          bun run build
+          nohup bun run start --port 3211 > "$RUNNER_TEMP/baseline.log" 2>&1 &
+          timeout 60 bash -c 'until curl -sf -o /dev/null http://localhost:3211; do sleep 1; done'
+          echo "BASELINE_URL=http://localhost:3211" >> "$GITHUB_ENV"
+
       - name: Benchmark
         run: bun run test:perf
       - name: Summary

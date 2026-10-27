@@ -15,19 +15,26 @@ const PRESETS = {
 } as const
 type PresetKey = keyof typeof PRESETS
 
+// Compression times depend on the runner's CPU, so in CI they are compared with
+// the base branch built and measured on the same runner (BASELINE_URL)
+const BASELINE_URL = process.env.BASELINE_URL
+
 interface PerfResults {
   loadMs: number
   jsBytes: number
   compressMs: Record<PresetKey, number>
+  baselineCompressMs?: Record<PresetKey, number>
+}
+
+interface Limit {
+  max: number | null
+  tolerance: number
 }
 
 interface PerfBudget {
-  tolerance: number
-  budget: {
-    loadMs: number | null
-    jsBytes: number | null
-    compressMs: Record<PresetKey, number | null>
-  }
+  loadMs: Limit
+  jsBytes: Limit
+  compressVsBaseline: { tolerance: number }
 }
 
 const median = (values: number[]) => {
@@ -92,34 +99,53 @@ async function measureLoad(browser: Browser) {
   return { loadMs, jsBytes }
 }
 
-test("performance et sortie de la compression", async ({ browser, page }) => {
-  const loads = []
-  for (let i = 0; i < RUNS; i++) loads.push(await measureLoad(browser))
-
-  await page.goto("/")
+// An app page with FFmpeg loaded, compressing the fixture one file at a time
+async function openCompressor(page: Page, url: string) {
+  await page.goto(url)
   await waitForFFmpeg(page)
-
-  const inputSize = statSync(FIXTURE).size
-  const downloads = page.locator('a[download$=".ogg"]')
-  const compressMs = {} as Record<PresetKey, number>
   let compressed = 0
 
-  for (const [key, preset] of Object.entries(PRESETS) as [PresetKey, (typeof PRESETS)[PresetKey]][]) {
-    await page.getByRole("button", { name: preset.button }).click()
-
-    const times = []
-    for (let i = 0; i < RUNS; i++) {
+  return {
+    page,
+    selectPreset: (key: PresetKey) => page.getByRole("button", { name: PRESETS[key].button }).click(),
+    async compress() {
       await page.locator('input[type="file"]').setInputFiles(FIXTURE)
       const start = await pageNow(page)
       await page.getByRole("button", { name: /^Compresser/ }).click()
       compressed++
-      const end = await waitForDownloads(page, compressed)
-      times.push(end - start)
+      return (await waitForDownloads(page, compressed)) - start
+    },
+  }
+}
+
+test("performance et sortie de la compression", async ({ browser, page }) => {
+  const loads = []
+  for (let i = 0; i < RUNS; i++) loads.push(await measureLoad(browser))
+
+  const app = await openCompressor(page, "/")
+  const baseline = BASELINE_URL ? await openCompressor(await browser.newPage(), BASELINE_URL) : null
+
+  const inputSize = statSync(FIXTURE).size
+  const compressMs = {} as Record<PresetKey, number>
+  const baselineCompressMs = {} as Record<PresetKey, number>
+
+  for (const [key, preset] of Object.entries(PRESETS) as [PresetKey, (typeof PRESETS)[PresetKey]][]) {
+    await app.selectPreset(key)
+    await baseline?.selectPreset(key)
+
+    // Alternate which side goes first, so drift in the runner's speed hits both equally
+    const times: number[] = []
+    const baselineTimes: number[] = []
+    for (let i = 0; i < RUNS; i++) {
+      if (baseline && i % 2 === 1) baselineTimes.push(await baseline.compress())
+      times.push(await app.compress())
+      if (baseline && i % 2 === 0) baselineTimes.push(await baseline.compress())
     }
     compressMs[key] = Math.round(median(times))
+    if (baseline) baselineCompressMs[key] = Math.round(median(baselineTimes))
 
     // The output must be a valid Ogg Vorbis file matching the preset, and smaller than the input
-    const href = await downloads.last().getAttribute("href")
+    const href = await page.locator('a[download$=".ogg"]').last().getAttribute("href")
     const bytes = new Uint8Array(await page.evaluate(async url => {
       const buffer = await (await fetch(url!)).arrayBuffer()
       return Array.from(new Uint8Array(buffer))
@@ -135,20 +161,23 @@ test("performance et sortie de la compression", async ({ browser, page }) => {
     loadMs: Math.round(median(loads.map(l => l.loadMs))),
     jsBytes: loads[0].jsBytes,
     compressMs,
+    ...(baseline && { baselineCompressMs }),
   }
   writeFileSync("perf-results.json", JSON.stringify(results, null, 2) + "\n")
   console.log(JSON.stringify(results, null, 2))
 
-  // A null budget is not enforced yet: it gets set from a first CI measurement
-  const { tolerance, budget }: PerfBudget = JSON.parse(readFileSync("perf-budget.json", "utf8"))
-  const check = (name: string, measured: number, limit: number | null) => {
+  // A null max is not enforced yet: it gets set from a first CI measurement
+  const budget: PerfBudget = JSON.parse(readFileSync("perf-budget.json", "utf8"))
+  const check = (name: string, measured: number, limit: number | null, tolerance: number) => {
     if (limit === null) return
-    expect.soft(measured, `${name} : ${measured} > budget ${limit} (+${tolerance * 100} %)`)
+    expect.soft(measured, `${name} : ${measured} > ${limit} (+${tolerance * 100} %)`)
       .toBeLessThanOrEqual(limit * (1 + tolerance))
   }
-  check("loadMs", results.loadMs, budget.loadMs)
-  check("jsBytes", results.jsBytes, budget.jsBytes)
-  for (const key of Object.keys(PRESETS) as PresetKey[]) {
-    check(`compressMs.${key}`, compressMs[key], budget.compressMs[key])
+  check("loadMs", results.loadMs, budget.loadMs.max, budget.loadMs.tolerance)
+  check("jsBytes", results.jsBytes, budget.jsBytes.max, budget.jsBytes.tolerance)
+  if (baseline) {
+    for (const key of Object.keys(PRESETS) as PresetKey[]) {
+      check(`compressMs.${key} vs base`, compressMs[key], baselineCompressMs[key], budget.compressVsBaseline.tolerance)
+    }
   }
 })

@@ -1,13 +1,5 @@
 {
-  "tolerance": 0.15,
-  "budget": {
-    "loadMs": null,
-    "jsBytes": null,
-    "compressMs": {
-      "ultra": null,
-      "light": null,
-      "medium": null,
-      "quality": null
-    }
-  }
+  "loadMs": { "max": 3707, "tolerance": 0.15 },
+  "jsBytes": { "max": 824460, "tolerance": 0.01 },
+  "compressVsBaseline": { "tolerance": 0.15 }
 }
