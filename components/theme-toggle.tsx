@@ -14,13 +14,32 @@ export function ThemeToggle() {
     () => false
   )
 
+  // next-themes re-enables transitions 1 ms after the switch, before Safari has
+  // repainted, so boxes still animate their colours. Hold transitions off until
+  // the new theme class is on <html> and two frames have actually been painted.
+  const toggleTheme = () => {
+    const root = document.documentElement
+    root.classList.add("theme-switching")
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      observer.disconnect()
+      requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")))
+    }
+    const observer = new MutationObserver(release)
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] })
+    setTimeout(release, 500)
+    setTheme(resolvedTheme === "dark" ? "light" : "dark")
+  }
+
   if (!mounted) return <div className="h-9 w-9" />
 
   return (
     <Button
       variant="outline"
       size="icon"
-      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+      onClick={toggleTheme}
       className="relative overflow-hidden bg-transparent text-muted-foreground shadow-none hover:text-foreground dark:bg-transparent"
       aria-label="Changer le thème"
     >
